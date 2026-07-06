@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Trends — Market Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          primary: "#174ecf",
+          "background-light": "#f8f9fc",
+        },
+        fontFamily: {
+          display: ["Space Grotesk", "sans-serif"],
+          sans: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        },
+        boxShadow: {
+          soft: "0 10px 40px -10px rgba(0,0,0,0.04)",
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fc; }
+  h1, h2, h3, .font-display { font-family: 'Space Grotesk', sans-serif; }
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+
+  @keyframes shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%);
+    background-size: 800px 100%;
+    animation: shimmer 1.4s infinite linear;
+  }
+</style>
+</head>
+<body class="min-h-screen bg-background-light text-slate-800">
+
+<header class="flex items-center justify-between whitespace-nowrap border-b border-[#e7ebf3] bg-white px-4 lg:px-10 py-3">
+  <div class="flex items-center gap-4 text-[#0e121b]">
+    <div class="size-4 text-primary">
+      <svg fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <path clip-rule="evenodd" d="M24 4H42V17.3333V30.6667H24V44H6V30.6667V17.3333H24V4Z" fill="#174ecf" fill-rule="evenodd"/>
+      </svg>
+    </div>
+    <h2 class="text-[#0e121b] text-lg font-bold tracking-[-0.015em]">Market Dashboard</h2>
+  </div>
+  <nav class="hidden lg:flex items-center gap-9">
+    <a class="text-[#4e6497] hover:text-[#0e121b] text-sm font-medium transition-colors" href="/">Market Pulse</a>
+    <a class="text-[#0e121b] text-sm font-semibold" href="/trends">AI Trends</a>
+    <a class="text-[#4e6497] hover:text-[#0e121b] text-sm font-medium transition-colors" href="#">Portfolio Insights</a>
+  </nav>
+</header>
+
+<div class="px-4 lg:px-40 pt-6 pb-2">
+  <h1 class="text-[#0e121b] text-[32px] font-bold font-display leading-tight">AI Trends</h1>
+  <p class="text-[#4e6497] text-sm">Market sentiment and macro indicators.</p>
+</div>
+
+<main class="px-4 lg:px-40 pb-12">
+  <div class="max-w-[960px] mx-auto">
+
+    <!-- Fear & Greed Card -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-soft p-6 lg:p-10">
+      <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div>
+          <h2 class="font-display text-xl font-bold text-slate-900">Fear &amp; Greed Index</h2>
+          <p class="text-sm text-slate-500 mt-1 max-w-lg">CNN's composite of seven market indicators — momentum, breadth, volatility, put/call ratios, junk-bond demand, and safe-haven flows.</p>
+        </div>
+        <span id="fng-timestamp" class="text-xs text-slate-400"></span>
+      </div>
+
+      <!-- Gauge -->
+      <div class="flex flex-col items-center">
+        <svg id="fng-gauge" viewBox="0 0 400 240" class="w-full max-w-[440px] h-auto">
+          <!-- Colored arc segments (drawn at load) -->
+          <g id="arc-segments" stroke-width="28" fill="none" stroke-linecap="butt"></g>
+
+          <!-- Tick marks at segment boundaries -->
+          <g id="tick-marks" stroke="#ffffff" stroke-width="2"></g>
+
+          <!-- Segment labels -->
+          <g id="segment-labels" font-size="9" font-family="Plus Jakarta Sans, sans-serif"
+             font-weight="600" fill="#64748b" text-anchor="middle"></g>
+
+          <!-- Needle (coords set directly by JS, no transforms) -->
+          <line id="needle-line" x1="200" y1="180" x2="200" y2="60" stroke="#0e121b" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="200" cy="180" r="10" fill="#0e121b"/>
+          <circle cx="200" cy="180" r="4" fill="#ffffff"/>
+
+          <!-- Score text -->
+          <text id="fng-score" x="200" y="220" text-anchor="middle" font-family="Space Grotesk, sans-serif"
+                font-size="44" font-weight="700" fill="#0e121b">—</text>
+        </svg>
+
+        <div id="fng-rating" class="mt-2 px-4 py-1.5 rounded-full text-sm font-semibold bg-slate-100 text-slate-500">
+          Loading…
+        </div>
+      </div>
+
+      <!-- Historical comparison -->
+      <div class="mt-10 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="comparison-card" data-key="previous_close">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Previous Close</div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <span class="font-display text-2xl font-bold text-slate-900 tabular-nums value">—</span>
+            <span class="text-xs text-slate-500 rating"></span>
+          </div>
+        </div>
+        <div class="comparison-card" data-key="previous_1_week">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">1 Week Ago</div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <span class="font-display text-2xl font-bold text-slate-900 tabular-nums value">—</span>
+            <span class="text-xs text-slate-500 rating"></span>
+          </div>
+        </div>
+        <div class="comparison-card" data-key="previous_1_month">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">1 Month Ago</div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <span class="font-display text-2xl font-bold text-slate-900 tabular-nums value">—</span>
+            <span class="text-xs text-slate-500 rating"></span>
+          </div>
+        </div>
+        <div class="comparison-card" data-key="previous_1_year">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">1 Year Ago</div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <span class="font-display text-2xl font-bold text-slate-900 tabular-nums value">—</span>
+            <span class="text-xs text-slate-500 rating"></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="fng-error" class="hidden mt-6 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded"></div>
+    </section>
+
+    <p class="text-[11px] text-slate-400 mt-4 text-center">
+      Source: production.dataviz.cnn.io · Unaffiliated with CNN · For informational use only
+    </p>
+  </div>
+</main>
+
+<script>
+// Gauge parameters
+const CX = 200, CY = 180, R = 140;
+
+// Five standard Fear & Greed bands.
+const SEGMENTS = [
+  { from:   0, to:  25, color: "#ef4444", label: "Extreme Fear" },
+  { from:  25, to:  45, color: "#f97316", label: "Fear"         },
+  { from:  45, to:  55, color: "#eab308", label: "Neutral"      },
+  { from:  55, to:  75, color: "#84cc16", label: "Greed"        },
+  { from:  75, to: 100, color: "#22c55e", label: "Extreme Greed"},
+];
+
+// Map value 0..100 to an angle where 0 is at left (270°), 100 is at right (90°) via top (0°).
+function valueToAngleDeg(v) {
+  return 270 + (v / 100) * 180; // 270 → 450 (=90)
+}
+function polarToCartesian(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+function describeArc(cx, cy, r, startVal, endVal) {
+  const startAngle = valueToAngleDeg(startVal);
+  const endAngle = valueToAngleDeg(endVal);
+  const start = polarToCartesian(cx, cy, r, startAngle);
+  const end   = polarToCartesian(cx, cy, r, endAngle);
+  // Always drawing short arcs here; large-arc = 0, sweep = 1 (clockwise in SVG).
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 0 1 ${end.x} ${end.y}`;
+}
+
+// Classify a value into a band label.
+function classify(v) {
+  if (v == null) return "";
+  for (const s of SEGMENTS) if (v >= s.from && v < s.to) return s.label;
+  return "Extreme Greed"; // v == 100
+}
+
+// ---- Draw the gauge base (segments, ticks, labels) ----
+(function renderBase() {
+  const arcG = document.getElementById("arc-segments");
+  const tickG = document.getElementById("tick-marks");
+  const labelG = document.getElementById("segment-labels");
+
+  // Small visual gap between segments
+  const GAP = 0.8;
+
+  SEGMENTS.forEach((s) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", describeArc(CX, CY, R, s.from + GAP, s.to - GAP));
+    path.setAttribute("stroke", s.color);
+    arcG.appendChild(path);
+
+    // Label at segment midpoint, just outside the arc
+    const mid = (s.from + s.to) / 2;
+    const labelPoint = polarToCartesian(CX, CY, R + 22, valueToAngleDeg(mid));
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", labelPoint.x);
+    text.setAttribute("y", labelPoint.y + 3);
+    text.textContent = s.label;
+    labelG.appendChild(text);
+  });
+
+  // Tick marks at boundaries 25, 45, 55, 75
+  [25, 45, 55, 75].forEach((v) => {
+    const inner = polarToCartesian(CX, CY, R - 14, valueToAngleDeg(v));
+    const outer = polarToCartesian(CX, CY, R + 14, valueToAngleDeg(v));
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", inner.x);
+    line.setAttribute("y1", inner.y);
+    line.setAttribute("x2", outer.x);
+    line.setAttribute("y2", outer.y);
+    line.setAttribute("stroke", "#cbd5e1");
+    tickG.appendChild(line);
+  });
+})();
+
+// ---- Animate the needle to a value ----
+// Compute tip coordinates from the value and set x2/y2 directly.
+// We animate in JS because CSS transitions don't reliably animate SVG geometric attributes.
+const NEEDLE_LEN = 120;
+let needleRAF = null;
+let currentNeedleValue = 50;
+
+function setNeedle(target, animate = true) {
+  if (target == null) return;
+  const line = document.getElementById("needle-line");
+  if (!animate) {
+    currentNeedleValue = target;
+    const tip = polarToCartesian(CX, CY, NEEDLE_LEN, valueToAngleDeg(target));
+    line.setAttribute("x2", tip.x);
+    line.setAttribute("y2", tip.y);
+    return;
+  }
+
+  if (needleRAF) cancelAnimationFrame(needleRAF);
+  const start = currentNeedleValue;
+  const delta = target - start;
+  const duration = 1200;
+  const t0 = performance.now();
+  // Ease-out-back for a subtle settle
+  const ease = (t) => {
+    const c1 = 1.70158, c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  };
+
+  function frame(now) {
+    const t = Math.min(1, (now - t0) / duration);
+    const v = start + delta * ease(t);
+    const tip = polarToCartesian(CX, CY, NEEDLE_LEN, valueToAngleDeg(v));
+    line.setAttribute("x2", tip.x);
+    line.setAttribute("y2", tip.y);
+    if (t < 1) {
+      needleRAF = requestAnimationFrame(frame);
+    } else {
+      currentNeedleValue = target;
+    }
+  }
+  needleRAF = requestAnimationFrame(frame);
+}
+
+function ratingColor(rating) {
+  const r = (rating || "").toLowerCase();
+  if (r.includes("extreme fear")) return { bg: "bg-red-50",     text: "text-red-700" };
+  if (r.includes("fear"))         return { bg: "bg-orange-50",  text: "text-orange-700" };
+  if (r.includes("neutral"))      return { bg: "bg-yellow-50",  text: "text-yellow-700" };
+  if (r.includes("extreme greed"))return { bg: "bg-emerald-50", text: "text-emerald-700" };
+  if (r.includes("greed"))        return { bg: "bg-lime-50",    text: "text-lime-700" };
+  return { bg: "bg-slate-100", text: "text-slate-600" };
+}
+
+function titleCase(s) {
+  return (s || "").split(/\s+/).map(w => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+function fmtTimestamp(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d)) return "";
+  return "As of " + d.toLocaleString(undefined, {
+    month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
+async function loadFearGreed() {
+  try {
+    const r = await fetch("/api/fear-greed");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    const score = Math.round(data.score ?? 0);
+    const rating = titleCase(data.rating || classify(data.score));
+
+    // Update score + rating
+    document.getElementById("fng-score").textContent = score;
+    const ratingEl = document.getElementById("fng-rating");
+    const rc = ratingColor(data.rating || classify(data.score));
+    ratingEl.className = `mt-2 px-4 py-1.5 rounded-full text-sm font-semibold ${rc.bg} ${rc.text}`;
+    ratingEl.textContent = rating;
+
+    // Timestamp
+    document.getElementById("fng-timestamp").textContent = fmtTimestamp(data.timestamp);
+
+    // Needle
+    setNeedle(data.score);
+
+    // Historical cards
+    document.querySelectorAll(".comparison-card").forEach((card) => {
+      const key = card.dataset.key;
+      const v = data[key];
+      if (v == null) return;
+      card.querySelector(".value").textContent = v.toFixed(1);
+      card.querySelector(".rating").textContent = classify(v);
+    });
+  } catch (e) {
+    const err = document.getElementById("fng-error");
+    err.textContent = `Couldn't load Fear & Greed data: ${e.message}.`;
+    err.classList.remove("hidden");
+    document.getElementById("fng-rating").textContent = "Unavailable";
+  }
+}
+
+loadFearGreed();
+</script>
+</body>
+</html>

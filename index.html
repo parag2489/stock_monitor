@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Market Screener — Market Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          primary: "#174ecf",
+          "background-light": "#f8f9fc",
+          "emerald-custom": "#10b981",
+          "rose-custom": "#f43f5e",
+        },
+        fontFamily: {
+          display: ["Space Grotesk", "sans-serif"],
+          sans: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        },
+        boxShadow: {
+          soft: "0 10px 40px -10px rgba(0,0,0,0.04)",
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8f9fc; }
+  h1, h2, h3, .font-display { font-family: 'Space Grotesk', sans-serif; }
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+  .select-custom-arrow {
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234e6497' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+  }
+
+  /* Unified operator + number input group */
+  .op-group {
+    display: inline-flex;
+    align-items: stretch;
+    height: 36px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    overflow: hidden;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .op-group:focus-within {
+    border-color: #174ecf;
+    box-shadow: 0 0 0 1px #174ecf;
+  }
+  .op-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #4e6497;
+    background: #f8fafc;
+    border-right: 1px solid #e2e8f0;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+    user-select: none;
+  }
+  .op-toggle:hover { background: #eef2f7; color: #0e121b; }
+  .op-group input {
+    width: 80px;
+    padding: 0 10px;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    color: #334155;
+    background: transparent;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%);
+    background-size: 800px 100%;
+    animation: shimmer 1.4s infinite linear;
+  }
+
+  /* Tabs */
+  .tab {
+    padding: 10px 2px;
+    margin-right: 28px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #64748b;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color .15s ease, border-color .15s ease;
+  }
+  .tab:hover { color: #0e121b; }
+  .tab.active {
+    color: #0e121b;
+    border-bottom-color: #174ecf;
+  }
+
+  /* Tab-scoped visibility. body[data-tab] toggles which controls & headers show. */
+  body[data-tab="stocks"]   .only-sectors { display: none !important; }
+  body[data-tab="sectors"]  .only-stocks  { display: none !important; }
+
+  /* Sector row expand/collapse */
+  .sector-row { cursor: pointer; }
+  .chevron-icon { transition: transform 0.2s ease; }
+  .sector-row.expanded .chevron-icon { transform: rotate(90deg); }
+  .sector-row.expanded { background-color: #f8fafc; }
+</style>
+</head>
+<body class="min-h-screen bg-background-light text-slate-800" data-tab="stocks">
+
+<header class="flex items-center justify-between whitespace-nowrap border-b border-[#e7ebf3] bg-white px-4 lg:px-10 py-3">
+  <div class="flex items-center gap-4 text-[#0e121b]">
+    <div class="size-4 text-primary">
+      <svg fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <path clip-rule="evenodd" d="M24 4H42V17.3333V30.6667H24V44H6V30.6667V17.3333H24V4Z" fill="#174ecf" fill-rule="evenodd"/>
+      </svg>
+    </div>
+    <h2 class="text-[#0e121b] text-lg font-bold tracking-[-0.015em]">Market Dashboard</h2>
+  </div>
+  <nav class="hidden lg:flex items-center gap-9">
+    <a class="text-[#0e121b] text-sm font-semibold" href="/">Market Pulse</a>
+    <a class="text-[#4e6497] hover:text-[#0e121b] text-sm font-medium transition-colors" href="/trends">AI Trends</a>
+    <a class="text-[#4e6497] hover:text-[#0e121b] text-sm font-medium transition-colors" href="#">Portfolio Insights</a>
+  </nav>
+</header>
+
+<div class="px-4 lg:px-40 pt-6 pb-2">
+  <h1 class="text-[#0e121b] text-[32px] font-bold font-display leading-tight">Market Screener</h1>
+  <p class="text-[#4e6497] text-sm">Live results pulled from TradingView's scanner. Filter by market, size, and momentum.</p>
+</div>
+
+<main class="px-4 lg:px-40 pb-12 pt-8">
+  <div class="max-w-[1400px] mx-auto">
+
+    <!-- Tabs -->
+    <div class="flex border-b border-slate-200 mb-5">
+      <button class="tab active" data-tab="stocks">Stocks</button>
+      <button class="tab" data-tab="sectors">Sectors</button>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 shadow-soft overflow-hidden flex flex-col">
+
+    <div class="p-4 border-b border-slate-100 bg-slate-50/30">
+      <div class="flex flex-wrap items-end gap-4">
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Market</label>
+          <select id="f-market" class="h-9 pl-3 pr-8 bg-white border border-slate-200 rounded text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary focus:border-primary select-custom-arrow"></select>
+        </div>
+
+        <div class="flex flex-col gap-1.5 only-stocks">
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Min Market Cap</label>
+          <div class="flex items-center gap-2">
+            <select id="f-market-cap" class="h-9 pl-3 pr-8 bg-white border border-slate-200 rounded text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary focus:border-primary select-custom-arrow">
+              <option value="">Any</option>
+              <option value="300000000">Micro ($300M+)</option>
+              <option value="2000000000" selected>Small ($2B+)</option>
+              <option value="10000000000">Mid ($10B+)</option>
+              <option value="200000000000">Large ($200B+)</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <div id="f-market-cap-custom-wrap" class="hidden items-stretch h-9 bg-white border border-slate-200 rounded overflow-hidden focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+              <input id="f-market-cap-custom" type="number" min="0" step="0.1" placeholder="0.0"
+                     class="w-20 h-full px-2 text-sm text-slate-700 bg-transparent outline-none"/>
+              <span class="h-full inline-flex items-center justify-center w-8 text-xs font-semibold text-slate-500 bg-slate-50 border-l border-slate-200">B</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">1D Change %</label>
+          <div class="op-group">
+            <span class="op-toggle" data-op="min" data-target="f-1d">≥</span>
+            <input id="f-1d" type="number" placeholder="0.00" step="0.1"/>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">7D Change %</label>
+          <div class="op-group">
+            <span class="op-toggle" data-op="min" data-target="f-7d">≥</span>
+            <input id="f-7d" type="number" placeholder="0.00" step="0.1"/>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">20D Change %</label>
+          <div class="op-group">
+            <span class="op-toggle" data-op="min" data-target="f-20d">≥</span>
+            <input id="f-20d" type="number" placeholder="0.00" step="0.1"/>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sort By</label>
+          <select id="f-sort" class="h-9 pl-3 pr-8 bg-white border border-slate-200 rounded text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary focus:border-primary select-custom-arrow">
+            <!-- Populated per-tab by rebuildSortOptions() -->
+          </select>
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Limit</label>
+          <select id="f-limit" class="h-9 pl-3 pr-8 bg-white border border-slate-200 rounded text-sm text-slate-700 outline-none focus:ring-1 focus:ring-primary focus:border-primary select-custom-arrow">
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+
+        <div class="ml-auto flex items-center gap-3 self-center">
+          <span id="status" class="text-xs text-slate-400"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead class="bg-white border-b border-slate-100">
+          <tr class="only-stocks">
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ticker</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Company</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Sector</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Price</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Mkt Cap</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">1D</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">7D</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">20D</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right" title="Relative Strength Index (14-day)">RSI</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Volume</th>
+          </tr>
+          <tr class="only-sectors">
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Sector</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right"># Stocks</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Mean 1D</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Mean 7D</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Mean 20D</th>
+          </tr>
+        </thead>
+        <tbody id="results" class="divide-y divide-slate-50"></tbody>
+      </table>
+    </div>
+
+    <div id="message" class="hidden p-10 text-center text-slate-500 text-sm"></div>
+    </div>
+  </div>
+
+  <p class="text-[11px] text-slate-400 mt-4 text-center">
+    Data via scanner.tradingview.com · Unaffiliated with TradingView · For informational use only · "20D" is TradingView's 1-month performance
+  </p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const API_BASE = "";
+
+const fmt = {
+  price: (v) => v == null ? "—" : "$" + v.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 }),
+  pct: (v) => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(2) + "%",
+  abs: (v) => v == null ? "" : " (" + (v >= 0 ? "+$" : "-$") + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 2 }) + ")",
+  cap: (v) => {
+    if (v == null) return "—";
+    if (v >= 1e12) return "$" + (v / 1e12).toFixed(2) + "T";
+    if (v >= 1e9)  return "$" + (v / 1e9).toFixed(2) + "B";
+    if (v >= 1e6)  return "$" + (v / 1e6).toFixed(1) + "M";
+    return "$" + v.toLocaleString();
+  },
+  vol: (v) => {
+    if (v == null) return "—";
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + "B";
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + "K";
+    return v.toLocaleString();
+  },
+};
+
+function tone(v) {
+  if (v == null) return "text-slate-500";
+  if (v > 0) return "text-emerald-custom";
+  if (v < 0) return "text-rose-custom";
+  return "text-slate-500";
+}
+
+function rsiTone(v) {
+  if (v == null) return "text-slate-500";
+  if (v < 30) return "text-emerald-custom font-semibold"; // oversold
+  if (v > 70) return "text-rose-custom font-semibold";    // overbought
+  return "text-slate-600";
+}
+
+async function loadMarkets() {
+  try {
+    const r = await fetch(`${API_BASE}/api/markets`);
+    const data = await r.json();
+    const sel = $("f-market");
+    sel.innerHTML = "";
+    Object.entries(data).forEach(([k, v]) => {
+      const o = document.createElement("option");
+      o.value = k; o.textContent = v;
+      if (k === "america") o.selected = true;
+      sel.appendChild(o);
+    });
+  } catch (e) {
+    $("f-market").innerHTML = '<option value="america">US</option>';
+  }
+}
+
+function skeletonRows(n) {
+  const body = $("results");
+  body.innerHTML = "";
+  const cols = currentTab() === "sectors" ? 5 : 10;
+  for (let i = 0; i < n; i++) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="${cols}" class="p-3"><div class="shimmer h-6 rounded"></div></td>`;
+    body.appendChild(tr);
+  }
+}
+
+function showMessage(text) {
+  $("results").innerHTML = "";
+  const msg = $("message");
+  msg.textContent = text;
+  msg.classList.remove("hidden");
+}
+function hideMessage() { $("message").classList.add("hidden"); }
+
+function renderStockRows(rows) {
+  const body = $("results");
+  body.innerHTML = "";
+  if (!rows.length) { showMessage("No matches. Try loosening the filters."); return; }
+  hideMessage();
+
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    tr.className = "hover:bg-slate-50 transition-colors";
+    tr.innerHTML = `
+      <td class="p-4 font-bold text-slate-900 font-display">${r.name ?? "—"}</td>
+      <td class="p-4 text-sm text-slate-700 max-w-[260px] truncate" title="${r.description ?? ""}">${r.description ?? "—"}</td>
+      <td class="p-4 text-sm text-slate-500">${r.sector ?? "—"}</td>
+      <td class="p-4 text-sm text-slate-700 text-right tabular-nums">${fmt.price(r.close)}</td>
+      <td class="p-4 text-sm text-slate-700 text-right tabular-nums">${fmt.cap(r.market_cap_basic)}</td>
+      <td class="p-4 text-sm text-right tabular-nums ${tone(r.change)}">${fmt.pct(r.change)}<span class="text-xs opacity-80">${fmt.abs(r.change_abs)}</span></td>
+      <td class="p-4 text-sm text-right tabular-nums ${tone(r["Perf.W"])}">${fmt.pct(r["Perf.W"])}<span class="text-xs opacity-80">${fmt.abs(r.change_abs_7d)}</span></td>
+      <td class="p-4 text-sm text-right tabular-nums ${tone(r["Perf.1M"])}">${fmt.pct(r["Perf.1M"])}<span class="text-xs opacity-80">${fmt.abs(r.change_abs_20d)}</span></td>
+      <td class="p-4 text-sm text-right tabular-nums ${rsiTone(r.RSI)}">${r.RSI == null ? "—" : r.RSI.toFixed(1)}</td>
+      <td class="p-4 text-sm text-slate-600 text-right tabular-nums">${fmt.vol(r.volume)}</td>
+    `;
+    body.appendChild(tr);
+  }
+}
+
+// Cache of fetched stocks per sector key, valid until next sectors render.
+const sectorStockCache = new Map();
+
+function renderSectorRows(rows) {
+  const body = $("results");
+  body.innerHTML = "";
+  sectorStockCache.clear();
+  if (!rows.length) { showMessage("No sectors match. Try loosening the filters."); return; }
+  hideMessage();
+
+  for (const r of rows) {
+    const sector = r.sector;
+
+    // Main sector row
+    const tr = document.createElement("tr");
+    tr.className = "sector-row hover:bg-slate-50 transition-colors";
+    tr.dataset.sector = sector ?? "";
+    tr.innerHTML = `
+      <td class="p-4 font-bold text-slate-900 font-display">
+        <span class="inline-flex items-center gap-2">
+          <svg class="chevron-icon text-slate-400" width="12" height="12" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+          ${sector ?? "—"}
+        </span>
+      </td>
+      <td class="p-4 text-sm text-slate-500 text-right tabular-nums">${r.count ?? 0}</td>
+      <td class="p-4 text-sm text-right tabular-nums ${tone(r.mean_1d)}">${fmt.pct(r.mean_1d)}</td>
+      <td class="p-4 text-sm text-right tabular-nums ${tone(r.mean_7d)}">${fmt.pct(r.mean_7d)}</td>
+      <td class="p-4 text-sm text-right tabular-nums ${tone(r.mean_20d)}">${fmt.pct(r.mean_20d)}</td>
+    `;
+    body.appendChild(tr);
+
+    // Expansion row (hidden initially)
+    const subTr = document.createElement("tr");
+    subTr.className = "sector-stocks hidden";
+    subTr.dataset.sector = sector ?? "";
+    subTr.innerHTML = `<td colspan="5" class="p-0 bg-slate-50/60 border-t border-slate-100">
+      <div class="px-6 py-4 sector-stocks-content"></div>
+    </td>`;
+    body.appendChild(subTr);
+
+    tr.addEventListener("click", () => toggleSector(sector, tr, subTr));
+  }
+}
+
+async function toggleSector(sector, row, subRow) {
+  const expand = !row.classList.contains("expanded");
+  row.classList.toggle("expanded", expand);
+  subRow.classList.toggle("hidden", !expand);
+  if (!expand) return;
+
+  const content = subRow.querySelector(".sector-stocks-content");
+
+  // Use cache if we already fetched it
+  if (sectorStockCache.has(sector)) {
+    renderInlineStocks(sectorStockCache.get(sector), content);
+    return;
+  }
+
+  // Skeleton while loading
+  content.innerHTML = `<div class="space-y-1.5">
+    ${[1,2,3,4].map(() => `<div class="shimmer h-5 rounded"></div>`).join("")}
+  </div>`;
+
+  try {
+    const params = new URLSearchParams({
+      market: $("f-market").value,
+      sector,
+      sort_by: "market_cap_basic",
+      ascending: "false",
+      limit: "20",
+    });
+    const r = await fetch(`/api/screener?${params}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const stocks = data.rows ?? [];
+    sectorStockCache.set(sector, stocks);
+    renderInlineStocks(stocks, content);
+  } catch (e) {
+    content.innerHTML = `<div class="text-xs text-rose-600">Couldn't load stocks: ${e.message}</div>`;
+  }
+}
+
+function renderInlineStocks(stocks, container) {
+  if (!stocks.length) {
+    container.innerHTML = `<div class="text-xs text-slate-400">No stocks found in this sector.</div>`;
+    return;
+  }
+
+  const rowsHtml = stocks.map(s => `
+    <tr class="hover:bg-white/80">
+      <td class="px-3 py-2 font-bold text-slate-800 font-display text-sm">${s.name ?? "—"}</td>
+      <td class="px-3 py-2 text-xs text-slate-600 max-w-[260px] truncate" title="${s.description ?? ""}">${s.description ?? "—"}</td>
+      <td class="px-3 py-2 text-xs text-right tabular-nums text-slate-700">${fmt.price(s.close)}</td>
+      <td class="px-3 py-2 text-xs text-right tabular-nums text-slate-600">${fmt.cap(s.market_cap_basic)}</td>
+      <td class="px-3 py-2 text-xs text-right tabular-nums ${tone(s.change)}">${fmt.pct(s.change)}</td>
+      <td class="px-3 py-2 text-xs text-right tabular-nums ${tone(s["Perf.W"])}">${fmt.pct(s["Perf.W"])}</td>
+      <td class="px-3 py-2 text-xs text-right tabular-nums ${tone(s["Perf.1M"])}">${fmt.pct(s["Perf.1M"])}</td>
+      <td class="px-3 py-2 text-xs text-right tabular-nums ${rsiTone(s.RSI)}">${s.RSI == null ? "—" : s.RSI.toFixed(1)}</td>
+    </tr>
+  `).join("");
+
+  container.innerHTML = `
+    <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Top ${stocks.length} by market cap</div>
+    <div class="rounded border border-slate-200 bg-white overflow-hidden">
+      <table class="w-full text-left">
+        <thead>
+          <tr class="bg-slate-50/60 border-b border-slate-100">
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Ticker</th>
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Company</th>
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">Price</th>
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">Mkt Cap</th>
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">1D</th>
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">7D</th>
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">20D</th>
+            <th class="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">RSI</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-50">${rowsHtml}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ---- Tab state ----
+function currentTab() {
+  return document.body.dataset.tab || "stocks";
+}
+
+const SORTS_STOCKS = [
+  ["market_cap_basic|desc", "Market Cap ↓"],
+  ["change|desc", "1D % ↓"],
+  ["change|asc", "1D % ↑"],
+  ["Perf.W|desc", "7D % ↓"],
+  ["Perf.W|asc", "7D % ↑"],
+  ["Perf.1M|desc", "20D % ↓"],
+  ["Perf.1M|asc", "20D % ↑"],
+  ["RSI|asc", "RSI ↑ (oversold)"],
+  ["RSI|desc", "RSI ↓ (overbought)"],
+  ["volume|desc", "Volume ↓"],
+];
+const SORTS_SECTORS = [
+  ["mean_1d|desc", "1D % ↓"],
+  ["mean_1d|asc", "1D % ↑"],
+  ["mean_7d|desc", "7D % ↓"],
+  ["mean_7d|asc", "7D % ↑"],
+  ["mean_20d|desc", "20D % ↓"],
+  ["mean_20d|asc", "20D % ↑"],
+  ["count|desc", "# Stocks ↓"],
+];
+
+function rebuildSortOptions() {
+  const sel = $("f-sort");
+  const prev = sel.value;
+  const opts = currentTab() === "sectors" ? SORTS_SECTORS : SORTS_STOCKS;
+  sel.innerHTML = "";
+  opts.forEach(([val, text], i) => {
+    const o = document.createElement("option");
+    o.value = val; o.textContent = text;
+    if (val === prev || (prev === "" && i === 0)) o.selected = true;
+    sel.appendChild(o);
+  });
+  // If previous value isn't in the new list, default to the first option
+  if (!opts.some(([v]) => v === sel.value)) sel.value = opts[0][0];
+}
+
+function currentMarketCap() {
+  const v = $("f-market-cap").value;
+  if (v === "") return null;
+  if (v === "custom") {
+    const raw = $("f-market-cap-custom").value;
+    if (raw === "" || isNaN(parseFloat(raw))) return null;
+    return parseFloat(raw) * 1e9;
+  }
+  return parseFloat(v);
+}
+
+function opParam(inputId, base) {
+  const input = $(inputId);
+  const raw = input.value;
+  if (raw === "") return null;
+  const toggle = document.querySelector(`.op-toggle[data-target="${inputId}"]`);
+  const op = toggle?.dataset.op === "max" ? "max" : "min";
+  return [`${op}_change_${base}`, raw];
+}
+
+let inflight = null;
+
+async function apply() {
+  const tab = currentTab();
+  const params = new URLSearchParams();
+  params.set("market", $("f-market").value);
+
+  if (tab === "stocks") {
+    const cap = currentMarketCap();
+    if (cap !== null) params.set("min_market_cap", cap);
+  }
+
+  for (const [id, base] of [["f-1d", "1d"], ["f-7d", "7d"], ["f-20d", "20d"]]) {
+    const p = opParam(id, base);
+    if (p) params.set(p[0], p[1]);
+  }
+
+  const [sortBy, dir] = $("f-sort").value.split("|");
+  params.set("sort_by", sortBy);
+  params.set("ascending", dir === "asc");
+  params.set("limit", $("f-limit").value);
+
+  if (inflight) inflight.abort();
+  const controller = new AbortController();
+  inflight = controller;
+
+  $("status").textContent = "Loading…";
+  skeletonRows(6);
+  hideMessage();
+
+  const endpoint = tab === "sectors" ? "/api/sectors" : "/api/screener";
+
+  // The sectors endpoint only needs market + volume; other params are ignored.
+  const url = tab === "sectors"
+    ? `${API_BASE}/api/sectors?market=${encodeURIComponent($("f-market").value)}`
+    : `${API_BASE}${endpoint}?${params.toString()}`;
+
+  try {
+    const r = await fetch(url, { signal: controller.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (controller.signal.aborted) return;
+    if (tab === "sectors") {
+      const filtered = filterAndSortSectors(data.rows ?? []);
+      renderSectorRows(filtered);
+      $("status").textContent = `${filtered.length} of ${data.count} sectors`;
+    } else {
+      renderStockRows(data.rows ?? []);
+      $("status").textContent = `${data.count} of ${data.total.toLocaleString()} matches`;
+    }
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    $("status").textContent = "";
+    showMessage(`Something went wrong: ${e.message}. Is the backend running?`);
+  }
+}
+
+function filterAndSortSectors(rows) {
+  // Apply the 1D/7D/20D change filters client-side using the same op toggles.
+  const checks = [
+    ["f-1d",  "mean_1d"],
+    ["f-7d",  "mean_7d"],
+    ["f-20d", "mean_20d"],
+  ];
+  let out = rows.filter((r) => {
+    for (const [inputId, field] of checks) {
+      const raw = $(inputId).value;
+      if (raw === "") continue;
+      const threshold = parseFloat(raw);
+      if (isNaN(threshold)) continue;
+      const v = r[field];
+      if (v == null) return false;
+      const op = document.querySelector(`.op-toggle[data-target="${inputId}"]`)?.dataset.op || "min";
+      if (op === "min" && v < threshold) return false;
+      if (op === "max" && v > threshold) return false;
+    }
+    return true;
+  });
+
+  // Client-side sort.
+  const [sortBy, dir] = $("f-sort").value.split("|");
+  const asc = dir === "asc";
+  out.sort((a, b) => {
+    const av = a[sortBy], bv = b[sortBy];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return asc ? av - bv : bv - av;
+  });
+
+  // Respect the Limit dropdown.
+  const lim = parseInt($("f-limit").value, 10);
+  if (!isNaN(lim)) out = out.slice(0, lim);
+  return out;
+}
+
+let debounceTimer = null;
+function applyDebounced() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(apply, 350);
+}
+
+// Operator toggle wiring
+document.querySelectorAll(".op-toggle").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const isMin = btn.dataset.op === "min";
+    btn.dataset.op = isMin ? "max" : "min";
+    btn.textContent = isMin ? "≤" : "≥";
+    const input = $(btn.dataset.target);
+    if (input && input.value !== "") apply();
+  });
+});
+
+// Market cap dropdown: show/hide custom input, apply
+$("f-market-cap").addEventListener("change", () => {
+  const wrap = $("f-market-cap-custom-wrap");
+  if ($("f-market-cap").value === "custom") {
+    wrap.classList.remove("hidden");
+    wrap.classList.add("inline-flex");
+    $("f-market-cap-custom").focus();
+    if ($("f-market-cap-custom").value === "") return;
+  } else {
+    wrap.classList.add("hidden");
+    wrap.classList.remove("inline-flex");
+  }
+  apply();
+});
+$("f-market-cap-custom").addEventListener("input", applyDebounced);
+
+// Auto-apply on change/input
+["f-market", "f-sort", "f-limit"].forEach((id) => $(id).addEventListener("change", apply));
+["f-1d", "f-7d", "f-20d"].forEach((id) => $(id).addEventListener("input", applyDebounced));
+
+// Tab click wiring
+document.querySelectorAll(".tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const t = btn.dataset.tab;
+    if (!t) return;
+    document.body.dataset.tab = t;
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === t));
+    rebuildSortOptions();
+    apply();
+  });
+});
+
+(async () => {
+  await loadMarkets();
+  rebuildSortOptions();
+  apply();
+})();
+</script>
+</body>
+</html>
