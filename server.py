@@ -362,7 +362,7 @@ def fear_greed() -> dict[str, Any]:
 # return {"available": false} and the frontend degrades gracefully.
 
 FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
-FMP_BASE = "https://financialmodelingprep.com/api/v3"
+FMP_BASE = "https://financialmodelingprep.com/stable"
 
 # Day-scoped in-memory cache: {(kind:ticker, YYYY-MM-DD): payload}.
 # Daily fundamentals and daily candles don't change intraday, so caching
@@ -379,7 +379,12 @@ def _fmp_get(path: str, params: dict[str, Any] | None = None) -> Any:
     p["apikey"] = FMP_API_KEY
     r = requests.get(f"{FMP_BASE}/{path}", params=p, timeout=15)
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    # FMP sometimes returns HTTP 200 with an error payload instead of a
+    # proper 4xx (e.g. plan restrictions, bad symbol). Surface it clearly.
+    if isinstance(data, dict) and ("Error Message" in data or "error" in data):
+        raise requests.RequestException(data.get("Error Message") or data.get("error"))
+    return data
 
 
 @app.get("/api/stock/{ticker}/detail")
@@ -397,30 +402,39 @@ def stock_detail(ticker: str) -> dict[str, Any]:
         return _day_cache[key]
 
     try:
-        ratios_list = _fmp_get(f"ratios-ttm/{ticker}")
-        profile_list = _fmp_get(f"profile/{ticker}")
+        ratios_list = _fmp_get("ratios-ttm", {"symbol": ticker})
+        profile_list = _fmp_get("profile", {"symbol": ticker})
     except requests.RequestException as e:
         raise HTTPException(502, f"Upstream FMP error: {e}")
 
     ratios = ratios_list[0] if ratios_list else {}
     profile = profile_list[0] if profile_list else {}
 
+    def pick(d: dict, *keys: str):
+        """Return the first present, non-None value among candidate field
+        names. FMP has renamed fields across API versions before; this
+        keeps us working through minor drift without another silent break."""
+        for k in keys:
+            if k in d and d[k] is not None:
+                return d[k]
+        return None
+
     result = {
         "available": True,
         "ticker": ticker,
         # Valuation (FMP's view; can differ slightly from TradingView's)
-        "pe_ttm": ratios.get("peRatioTTM"),
-        "peg_ttm": ratios.get("pegRatioTTM"),
-        "price_to_sales_ttm": ratios.get("priceToSalesRatioTTM"),
-        "price_to_book_ttm": ratios.get("priceToBookRatioTTM"),
-        "price_to_fcf_ttm": ratios.get("priceToFreeCashFlowsRatioTTM"),
+        "pe_ttm": pick(ratios, "peRatioTTM", "priceToEarningsRatioTTM"),
+        "peg_ttm": pick(ratios, "pegRatioTTM", "priceEarningsToGrowthRatioTTM"),
+        "price_to_sales_ttm": pick(ratios, "priceToSalesRatioTTM"),
+        "price_to_book_ttm": pick(ratios, "priceToBookRatioTTM"),
+        "price_to_fcf_ttm": pick(ratios, "priceToFreeCashFlowsRatioTTM"),
         # Profitability & balance sheet quality
-        "net_margin_ttm": ratios.get("netProfitMarginTTM"),
-        "gross_margin_ttm": ratios.get("grossProfitMarginTTM"),
-        "roe_ttm": ratios.get("returnOnEquityTTM"),
-        "debt_to_equity_ttm": ratios.get("debtEquityRatioTTM"),
-        "current_ratio_ttm": ratios.get("currentRatioTTM"),
-        "dividend_yield_ttm": ratios.get("dividendYielTTM") or ratios.get("dividendYieldTTM"),
+        "net_margin_ttm": pick(ratios, "netProfitMarginTTM", "netIncomePerEBTTTM"),
+        "gross_margin_ttm": pick(ratios, "grossProfitMarginTTM"),
+        "roe_ttm": pick(ratios, "returnOnEquityTTM"),
+        "debt_to_equity_ttm": pick(ratios, "debtEquityRatioTTM", "debtToEquityRatioTTM"),
+        "current_ratio_ttm": pick(ratios, "currentRatioTTM"),
+        "dividend_yield_ttm": pick(ratios, "dividendYielTTM", "dividendYieldTTM"),
         # Profile
         "beta": profile.get("beta"),
         "industry": profile.get("industry"),
@@ -509,19 +523,28 @@ def stock_levels(ticker: str) -> dict[str, Any]:
     today = dt.date.today()
     frm = (today - dt.timedelta(days=365)).isoformat()
     try:
-        data = _fmp_get(f"historical-price-full/{ticker}", {"from": frm, "to": today.isoformat()})
+        data = _fmp_get(
+            "historical-price-eod/full",
+            {"symbol": ticker, "from": frm, "to": today.isoformat()},
+        )
     except requests.RequestException as e:
         raise HTTPException(502, f"Upstream FMP error: {e}")
 
-    hist = data.get("historical") or []
+    # The stable API returns a flat list of daily bars directly. Some legacy
+    # responses (or future changes) wrap it as {"historical": [...]} — handle both.
+    hist = data if isinstance(data, list) else (data.get("historical") or [])
     if len(hist) < 40:
         return {"available": False, "reason": "Not enough price history"}
 
-    # FMP returns newest-first; we want chronological.
-    candles = [
-        {"high": h["high"], "low": h["low"], "close": h["close"], "date": h["date"]}
-        for h in reversed(hist)
-    ]
+    # Sort chronologically by date rather than trusting the API's order,
+    # since that has changed between FMP API versions before.
+    candles = sorted(
+        (
+            {"high": h["high"], "low": h["low"], "close": h["close"], "date": h["date"]}
+            for h in hist
+        ),
+        key=lambda c: c["date"],
+    )
     n = len(candles)
     price = candles[-1]["close"]
 
