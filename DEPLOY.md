@@ -69,6 +69,20 @@ If you bought `marketmovement.com` or similar:
 3. Add that record at your domain registrar's DNS settings
 4. Render auto-provisions a free HTTPS certificate once DNS propagates (can take up to a few hours)
 
+## FMP API key (stock detail panel & support/resistance)
+
+The expandable stock rows use Financial Modeling Prep for deeper fundamentals
+and price history (~250 free requests/day):
+
+1. Sign up free at <https://site.financialmodelingprep.com/developer/docs>
+   and copy your API key
+2. In Render: your service → **Environment** → add `FMP_API_KEY` = your key
+   (the Blueprint prompts for this automatically on first deploy)
+3. For local dev: `FMP_API_KEY=yourkey uvicorn server:app --reload`
+
+Without the key everything else works — the expand panel just shows
+TradingView data and marks the deeper fundamentals and levels as unavailable.
+
 ## What to expect on the free tier
 
 - **Cold starts.** After 15 minutes with no traffic, the service spins down.

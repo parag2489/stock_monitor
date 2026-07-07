@@ -13,6 +13,8 @@ Open:
 
 from __future__ import annotations
 
+import datetime as dt
+import os
 import pathlib
 from typing import Any, Optional
 
@@ -56,6 +58,9 @@ COLUMNS: list[str] = [
     "Perf.W",            # 7D %
     "Perf.1M",           # ~20D % (TradingView only exposes calendar-month, not 20-trading-day)
     "RSI",               # Relative Strength Index, 14-period daily
+    "price_earnings_ttm",         # P/E (trailing 12 months)
+    "price_sales_current",        # P/S
+    "price_earnings_growth_ttm",  # PEG (trailing; null for many names)
     "volume",
     "market_cap_basic",
     "sector",
@@ -201,207 +206,6 @@ def screener(
     }
 
 
-@app.get("/api/sectors")
-def sectors(
-    market: str = Query("america"),
-    min_change_1d: Optional[float] = None,
-    max_change_1d: Optional[float] = None,
-    min_change_7d: Optional[float] = None,
-    max_change_7d: Optional[float] = None,
-    min_change_20d: Optional[float] = None,
-    max_change_20d: Optional[float] = None,
-    min_volume: float = Query(1_000_000),
-    sort_by: str = Query("mean_1d"),
-    ascending: bool = False,
-    limit: int = Query(50, ge=1, le=200),
-) -> dict[str, Any]:
-    """Aggregate liquid stocks by sector and return mean 1D/7D/20D changes."""
-    if market not in MARKETS:
-        raise HTTPException(400, f"Unknown market: {market}")
-
-    # Fetch a wide net of liquid stocks (top ~1500 by mcap), then group.
-    payload: dict[str, Any] = {
-        "filter": [
-            {"left": "volume", "operation": "egreater", "right": min_volume},
-            {"left": "market_cap_basic", "operation": "egreater", "right": 100_000_000},
-        ],
-        "options": {"lang": "en"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["sector", "change", "Perf.W", "Perf.1M"],
-        "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
-        "range": [0, 1500],
-    }
-
-    try:
-        r = requests.post(
-            SCANNER_URL.format(market=market),
-            json=payload,
-            timeout=TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-        )
-        r.raise_for_status()
-    except requests.RequestException as e:
-        raise HTTPException(502, f"Upstream TradingView error: {e}")
-
-    raw_rows = r.json().get("data") or []
-
-    # Group stocks by sector.
-    groups: dict[str, dict[str, list[float]]] = {}
-    for item in raw_rows:
-        d = item.get("d") or []
-        if len(d) < 4:
-            continue
-        sector, change, perf_w, perf_m = d
-        if not sector:
-            continue
-        g = groups.setdefault(sector, {"change": [], "perf_w": [], "perf_m": []})
-        if change is not None: g["change"].append(change)
-        if perf_w is not None: g["perf_w"].append(perf_w)
-        if perf_m is not None: g["perf_m"].append(perf_m)
-
-    def mean(a: list[float]) -> Optional[float]:
-        return sum(a) / len(a) if a else None
-
-    sector_rows: list[dict[str, Any]] = []
-    for name, arrays in groups.items():
-        sector_rows.append({
-            "sector": name,
-            "count": len(arrays["change"]),
-            "mean_1d": mean(arrays["change"]),
-            "mean_7d": mean(arrays["perf_w"]),
-            "mean_20d": mean(arrays["perf_m"]),
-        })
-
-    # Apply filters on the aggregated means.
-    def passes(s: dict[str, Any]) -> bool:
-        checks = [
-            ("mean_1d", min_change_1d, "min"), ("mean_1d", max_change_1d, "max"),
-            ("mean_7d", min_change_7d, "min"), ("mean_7d", max_change_7d, "max"),
-            ("mean_20d", min_change_20d, "min"), ("mean_20d", max_change_20d, "max"),
-        ]
-        for col, bound, kind in checks:
-            if bound is None:
-                continue
-            v = s.get(col)
-            if v is None:
-                return False
-            if kind == "min" and v < bound:
-                return False
-            if kind == "max" and v > bound:
-                return False
-        return True
-
-    sector_rows = [s for s in sector_rows if passes(s)]
-
-    # Sort; None values sink to the bottom regardless of direction.
-    def sort_key(s: dict[str, Any]) -> float:
-        v = s.get(sort_by)
-        if v is None:
-            return float("inf") if ascending else float("-inf")
-        return v
-
-    sector_rows.sort(key=sort_key, reverse=not ascending)
-
-    return {
-        "total": len(sector_rows),
-        "count": min(len(sector_rows), limit),
-        "market": market,
-        "rows": sector_rows[:limit],
-    }
-
-
-@app.get("/api/sectors")
-def sectors(
-    market: str = Query("america"),
-    min_change_1d: Optional[float] = None,
-    max_change_1d: Optional[float] = None,
-    min_change_7d: Optional[float] = None,
-    max_change_7d: Optional[float] = None,
-    min_change_20d: Optional[float] = None,
-    max_change_20d: Optional[float] = None,
-    sort_by: str = Query("change"),
-    ascending: bool = False,
-    min_volume: float = 1_000_000,
-) -> dict[str, Any]:
-    """Aggregate mean 1D/7D/20D change per sector.
-
-    Approach: pull a large set of stocks in the chosen market (volume-filtered),
-    group by `sector`, compute means, then apply the user's change filters on the
-    aggregated numbers and sort.
-    """
-    if market not in MARKETS:
-        raise HTTPException(400, f"Unknown market: {market}")
-
-    # Pull a wide slice for robust averages. 1000 rows is plenty and fast.
-    payload = {
-        "filter": [{"left": "volume", "operation": "egreater", "right": min_volume}],
-        "options": {"lang": "en"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["sector", "change", "Perf.W", "Perf.1M", "market_cap_basic"],
-        "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
-        "range": [0, 1000],
-    }
-    try:
-        r = requests.post(
-            SCANNER_URL.format(market=market), json=payload, timeout=TIMEOUT,
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-        )
-        r.raise_for_status()
-    except requests.RequestException as e:
-        raise HTTPException(502, f"Upstream TradingView error: {e}")
-
-    raw_rows = r.json().get("data") or []
-
-    # Group and average. Weight equally (arithmetic mean of % changes across stocks
-    # in each sector). Market-cap-weighted would also be reasonable and is a trivial
-    # extension if we want it later.
-    agg: dict[str, dict[str, Any]] = {}
-    for item in raw_rows:
-        d = item["d"]
-        sector, ch, w, m, mc = d[0], d[1], d[2], d[3], d[4]
-        if not sector:
-            continue
-        bucket = agg.setdefault(sector, {
-            "count": 0, "change": 0.0, "Perf.W": 0.0, "Perf.1M": 0.0, "market_cap": 0.0,
-        })
-        bucket["count"] += 1
-        if ch is not None:      bucket["change"] += ch
-        if w is not None:       bucket["Perf.W"] += w
-        if m is not None:       bucket["Perf.1M"] += m
-        if mc is not None:      bucket["market_cap"] += mc
-
-    sector_rows = []
-    for sector, b in agg.items():
-        n = b["count"]
-        if n == 0: continue
-        sector_rows.append({
-            "sector": sector,
-            "count": n,
-            "change": b["change"] / n,
-            "Perf.W": b["Perf.W"] / n,
-            "Perf.1M": b["Perf.1M"] / n,
-            "market_cap": b["market_cap"],  # total, not averaged
-        })
-
-    # Apply the user's change filters on aggregated values
-    def keep(row: dict[str, Any]) -> bool:
-        if min_change_1d is not None and row["change"] < min_change_1d: return False
-        if max_change_1d is not None and row["change"] > max_change_1d: return False
-        if min_change_7d is not None and row["Perf.W"] < min_change_7d: return False
-        if max_change_7d is not None and row["Perf.W"] > max_change_7d: return False
-        if min_change_20d is not None and row["Perf.1M"] < min_change_20d: return False
-        if max_change_20d is not None and row["Perf.1M"] > max_change_20d: return False
-        return True
-
-    sector_rows = [r for r in sector_rows if keep(r)]
-
-    # Sort. Accept the same column keys as /api/screener for consistency.
-    sort_key_map = {"change": "change", "Perf.W": "Perf.W", "Perf.1M": "Perf.1M"}
-    key = sort_key_map.get(sort_by, "change")
-    sector_rows.sort(key=lambda x: (x.get(key) is None, x.get(key)), reverse=not ascending)
-
-    return {"market": market, "count": len(sector_rows), "rows": sector_rows}
-
 
 # Serve the frontend alongside the API so this is one self-contained process.
 @app.get("/")
@@ -424,7 +228,17 @@ SECTOR_AGG_COLUMNS: list[str] = [
     "Perf.W",
     "Perf.1M",
     "market_cap_basic",
+    "price_earnings_ttm",
 ]
+
+
+def _median(xs: list[float]) -> Optional[float]:
+    if not xs:
+        return None
+    s = sorted(xs)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
 
 
 @app.get("/api/sectors")
@@ -471,7 +285,7 @@ def sectors(
         sec = vals.get("sector")
         if not sec:
             continue
-        b = buckets.setdefault(sec, {"change": [], "Perf.W": [], "Perf.1M": [], "mcap": []})
+        b = buckets.setdefault(sec, {"change": [], "Perf.W": [], "Perf.1M": [], "mcap": [], "pe": []})
         for key in ("change", "Perf.W", "Perf.1M"):
             v = vals.get(key)
             if v is not None:
@@ -479,6 +293,9 @@ def sectors(
         mc = vals.get("market_cap_basic")
         if mc is not None:
             b["mcap"].append(mc)
+        pe = vals.get("price_earnings_ttm")
+        if pe is not None and 0 < pe < 500:  # drop negatives and absurd outliers
+            b["pe"].append(pe)
 
     def mean(xs: list[float]) -> Optional[float]:
         return sum(xs) / len(xs) if xs else None
@@ -491,6 +308,7 @@ def sectors(
             "mean_1d":  mean(b["change"]),
             "mean_7d":  mean(b["Perf.W"]),
             "mean_20d": mean(b["Perf.1M"]),
+            "median_pe": _median(b["pe"]),
             "total_market_cap": sum(b["mcap"]) if b["mcap"] else None,
         })
 
@@ -532,3 +350,235 @@ def fear_greed() -> dict[str, Any]:
         "previous_1_month": fng.get("previous_1_month"),
         "previous_1_year": fng.get("previous_1_year"),
     }
+
+
+# ======================================================================
+# Phase 1 & 3: FMP-powered stock detail + support/resistance levels
+# ======================================================================
+#
+# Both endpoints require a free Financial Modeling Prep API key:
+#   https://site.financialmodelingprep.com/developer/docs  (~250 req/day free)
+# Set it as the FMP_API_KEY environment variable. Without it, the endpoints
+# return {"available": false} and the frontend degrades gracefully.
+
+FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+FMP_BASE = "https://financialmodelingprep.com/api/v3"
+
+# Day-scoped in-memory cache: {(kind:ticker, YYYY-MM-DD): payload}.
+# Daily fundamentals and daily candles don't change intraday, so caching
+# until midnight both speeds up repeat clicks and conserves the FMP budget.
+_day_cache: dict[tuple[str, str], Any] = {}
+
+
+def _cache_key(kind: str, ticker: str) -> tuple[str, str]:
+    return (f"{kind}:{ticker.upper()}", dt.date.today().isoformat())
+
+
+def _fmp_get(path: str, params: dict[str, Any] | None = None) -> Any:
+    p = dict(params or {})
+    p["apikey"] = FMP_API_KEY
+    r = requests.get(f"{FMP_BASE}/{path}", params=p, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+@app.get("/api/stock/{ticker}/detail")
+def stock_detail(ticker: str) -> dict[str, Any]:
+    """FMP enrichment for the expand panel: margins, debt, beta, dividend.
+
+    Uses 2 FMP calls per ticker per day (ratios-ttm + profile), cached.
+    """
+    ticker = ticker.upper()
+    if not FMP_API_KEY:
+        return {"available": False, "reason": "FMP_API_KEY not configured"}
+
+    key = _cache_key("detail", ticker)
+    if key in _day_cache:
+        return _day_cache[key]
+
+    try:
+        ratios_list = _fmp_get(f"ratios-ttm/{ticker}")
+        profile_list = _fmp_get(f"profile/{ticker}")
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Upstream FMP error: {e}")
+
+    ratios = ratios_list[0] if ratios_list else {}
+    profile = profile_list[0] if profile_list else {}
+
+    result = {
+        "available": True,
+        "ticker": ticker,
+        # Valuation (FMP's view; can differ slightly from TradingView's)
+        "pe_ttm": ratios.get("peRatioTTM"),
+        "peg_ttm": ratios.get("pegRatioTTM"),
+        "price_to_sales_ttm": ratios.get("priceToSalesRatioTTM"),
+        "price_to_book_ttm": ratios.get("priceToBookRatioTTM"),
+        "price_to_fcf_ttm": ratios.get("priceToFreeCashFlowsRatioTTM"),
+        # Profitability & balance sheet quality
+        "net_margin_ttm": ratios.get("netProfitMarginTTM"),
+        "gross_margin_ttm": ratios.get("grossProfitMarginTTM"),
+        "roe_ttm": ratios.get("returnOnEquityTTM"),
+        "debt_to_equity_ttm": ratios.get("debtEquityRatioTTM"),
+        "current_ratio_ttm": ratios.get("currentRatioTTM"),
+        "dividend_yield_ttm": ratios.get("dividendYielTTM") or ratios.get("dividendYieldTTM"),
+        # Profile
+        "beta": profile.get("beta"),
+        "industry": profile.get("industry"),
+        "employees": profile.get("fullTimeEmployees"),
+        "description": profile.get("description"),
+        "website": profile.get("website"),
+    }
+    _day_cache[key] = result
+    return result
+
+
+# ---- Support / resistance from swing-point clustering ----------------
+
+def _find_swings(candles: list[dict], k: int = 3) -> tuple[list[float], list[float]]:
+    """A bar is a swing high if its high is the max of the k bars on each
+    side (swing low symmetric). Classic fractal definition."""
+    highs, lows = [], []
+    n = len(candles)
+    for i in range(k, n - k):
+        window = candles[i - k: i + k + 1]
+        hi = candles[i]["high"]
+        lo = candles[i]["low"]
+        if hi == max(c["high"] for c in window):
+            highs.append((i, hi))
+        if lo == min(c["low"] for c in window):
+            lows.append((i, lo))
+    return highs, lows
+
+
+def _cluster_levels(swings: list[tuple[int, float]], tolerance: float, n_bars: int) -> list[dict]:
+    """Merge swing points within `tolerance` (fraction of price) into zones.
+    Zone strength = number of touches, boosted for recent touches."""
+    if not swings:
+        return []
+    pts = sorted(swings, key=lambda t: t[1])
+    clusters: list[list[tuple[int, float]]] = [[pts[0]]]
+    for idx, price in pts[1:]:
+        center = sum(p for _, p in clusters[-1]) / len(clusters[-1])
+        if abs(price - center) / center <= tolerance:
+            clusters[-1].append((idx, price))
+        else:
+            clusters.append([(idx, price)])
+
+    zones = []
+    for c in clusters:
+        center = sum(p for _, p in c) / len(c)
+        touches = len(c)
+        # Recency boost: touches in the most recent quarter of the window count extra
+        recent = sum(1 for i, _ in c if i >= n_bars * 0.75)
+        zones.append({
+            "level": round(center, 2),
+            "touches": touches,
+            "recent_touches": recent,
+            "strength": touches + 0.5 * recent,
+        })
+    return zones
+
+
+def _atr(candles: list[dict], period: int = 14) -> Optional[float]:
+    if len(candles) < period + 1:
+        return None
+    trs = []
+    for i in range(1, len(candles)):
+        h, l = candles[i]["high"], candles[i]["low"]
+        pc = candles[i - 1]["close"]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    recent = trs[-period:]
+    return sum(recent) / len(recent)
+
+
+@app.get("/api/stock/{ticker}/levels")
+def stock_levels(ticker: str) -> dict[str, Any]:
+    """Support/resistance zones from ~1 year of daily candles, plus ATR and
+    a risk/reward ratio at the current price.
+
+    Uses 1 FMP call per ticker per day, cached.
+    """
+    ticker = ticker.upper()
+    if not FMP_API_KEY:
+        return {"available": False, "reason": "FMP_API_KEY not configured"}
+
+    key = _cache_key("levels", ticker)
+    if key in _day_cache:
+        return _day_cache[key]
+
+    today = dt.date.today()
+    frm = (today - dt.timedelta(days=365)).isoformat()
+    try:
+        data = _fmp_get(f"historical-price-full/{ticker}", {"from": frm, "to": today.isoformat()})
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Upstream FMP error: {e}")
+
+    hist = data.get("historical") or []
+    if len(hist) < 40:
+        return {"available": False, "reason": "Not enough price history"}
+
+    # FMP returns newest-first; we want chronological.
+    candles = [
+        {"high": h["high"], "low": h["low"], "close": h["close"], "date": h["date"]}
+        for h in reversed(hist)
+    ]
+    n = len(candles)
+    price = candles[-1]["close"]
+
+    swing_highs, swing_lows = _find_swings(candles, k=3)
+    # Tolerance scales a little with volatility; 1.5% default.
+    high_zones = _cluster_levels(swing_highs, 0.015, n)
+    low_zones = _cluster_levels(swing_lows, 0.015, n)
+
+    # Nearest resistance above price / support below, preferring stronger zones
+    # when two are close together (within 2%).
+    def pick(zones: list[dict], above: bool) -> Optional[dict]:
+        side = [z for z in zones if (z["level"] > price) == above and z["level"] != price]
+        if not side:
+            return None
+        side.sort(key=lambda z: abs(z["level"] - price))
+        best = side[0]
+        for z in side[1:3]:
+            if abs(z["level"] - best["level"]) / price < 0.02 and z["strength"] > best["strength"]:
+                best = z
+        return best
+
+    resistance = pick(high_zones + low_zones, above=True)   # old support can act as resistance
+    support = pick(low_zones + high_zones, above=False)     # and vice versa
+
+    # Fall back to 52-week extremes if no swing zone exists on a side
+    hi_52w = max(c["high"] for c in candles)
+    lo_52w = min(c["low"] for c in candles)
+    if resistance is None and hi_52w > price:
+        resistance = {"level": round(hi_52w, 2), "touches": 1, "recent_touches": 0,
+                      "strength": 1, "fallback": "52w high"}
+    if support is None and lo_52w < price:
+        support = {"level": round(lo_52w, 2), "touches": 1, "recent_touches": 0,
+                   "strength": 1, "fallback": "52w low"}
+
+    rr = None
+    if resistance and support:
+        upside = resistance["level"] - price
+        downside = price - support["level"]
+        if downside > 0:
+            rr = round(upside / downside, 2)
+
+    atr = _atr(candles)
+    result = {
+        "available": True,
+        "ticker": ticker,
+        "price": price,
+        "as_of": candles[-1]["date"],
+        "support": support,
+        "resistance": resistance,
+        "risk_reward": rr,
+        "atr_14": round(atr, 2) if atr else None,
+        "atr_pct": round(atr / price * 100, 2) if atr and price else None,
+        "week52_high": round(hi_52w, 2),
+        "week52_low": round(lo_52w, 2),
+        "candles_used": n,
+        "note": "Zones from swing-point clustering over ~1y of daily bars. "
+                "Heuristic screening aid, not a prediction.",
+    }
+    _day_cache[key] = result
+    return result

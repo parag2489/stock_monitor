@@ -9,4 +9,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: FMP_API_KEY
+        sync: false   # prompts you to paste the key in the Render dashboard
     healthCheckPath: /api/markets

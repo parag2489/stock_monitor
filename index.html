@@ -241,6 +241,7 @@
             <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">7D</th>
             <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">20D</th>
             <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right" title="Relative Strength Index (14-day)">RSI</th>
+            <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right" title="Price / earnings, trailing 12 months">P/E</th>
             <th class="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Volume</th>
           </tr>
           <tr class="only-sectors">
@@ -322,7 +323,7 @@ async function loadMarkets() {
 function skeletonRows(n) {
   const body = $("results");
   body.innerHTML = "";
-  const cols = currentTab() === "sectors" ? 5 : 10;
+  const cols = currentTab() === "sectors" ? 5 : 11;
   for (let i = 0; i < n; i++) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td colspan="${cols}" class="p-3"><div class="shimmer h-6 rounded"></div></td>`;
@@ -338,17 +339,34 @@ function showMessage(text) {
 }
 function hideMessage() { $("message").classList.add("hidden"); }
 
+// Client-side caches for expand-panel data, cleared on each re-render.
+const stockDetailCache = new Map();   // ticker -> /api/stock/{t}/detail JSON
+const stockLevelsCache = new Map();   // ticker -> /api/stock/{t}/levels JSON
+let sectorMedianPE = null;            // sector name -> median P/E (lazy, per market)
+
+function fmtRatio(v) { return v == null ? "—" : v.toFixed(2); }
+
 function renderStockRows(rows) {
   const body = $("results");
   body.innerHTML = "";
+  stockDetailCache.clear();
+  stockLevelsCache.clear();
   if (!rows.length) { showMessage("No matches. Try loosening the filters."); return; }
   hideMessage();
 
   for (const r of rows) {
     const tr = document.createElement("tr");
-    tr.className = "hover:bg-slate-50 transition-colors";
+    tr.className = "sector-row hover:bg-slate-50 transition-colors"; // reuse cursor/chevron styles
     tr.innerHTML = `
-      <td class="p-4 font-bold text-slate-900 font-display">${r.name ?? "—"}</td>
+      <td class="p-4 font-bold text-slate-900 font-display">
+        <span class="inline-flex items-center gap-2">
+          <svg class="chevron-icon text-slate-400" width="12" height="12" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+          ${r.name ?? "—"}
+        </span>
+      </td>
       <td class="p-4 text-sm text-slate-700 max-w-[260px] truncate" title="${r.description ?? ""}">${r.description ?? "—"}</td>
       <td class="p-4 text-sm text-slate-500">${r.sector ?? "—"}</td>
       <td class="p-4 text-sm text-slate-700 text-right tabular-nums">${fmt.price(r.close)}</td>
@@ -357,10 +375,173 @@ function renderStockRows(rows) {
       <td class="p-4 text-sm text-right tabular-nums ${tone(r["Perf.W"])}">${fmt.pct(r["Perf.W"])}<span class="text-xs opacity-80">${fmt.abs(r.change_abs_7d)}</span></td>
       <td class="p-4 text-sm text-right tabular-nums ${tone(r["Perf.1M"])}">${fmt.pct(r["Perf.1M"])}<span class="text-xs opacity-80">${fmt.abs(r.change_abs_20d)}</span></td>
       <td class="p-4 text-sm text-right tabular-nums ${rsiTone(r.RSI)}">${r.RSI == null ? "—" : r.RSI.toFixed(1)}</td>
+      <td class="p-4 text-sm text-slate-700 text-right tabular-nums">${fmtRatio(r.price_earnings_ttm)}</td>
       <td class="p-4 text-sm text-slate-600 text-right tabular-nums">${fmt.vol(r.volume)}</td>
     `;
     body.appendChild(tr);
+
+    const subTr = document.createElement("tr");
+    subTr.className = "hidden";
+    subTr.innerHTML = `<td colspan="11" class="p-0 bg-slate-50/60 border-t border-slate-100">
+      <div class="px-6 py-5 stock-detail-content"></div>
+    </td>`;
+    body.appendChild(subTr);
+
+    tr.addEventListener("click", () => toggleStock(r, tr, subTr));
   }
+}
+
+async function ensureSectorMedians() {
+  if (sectorMedianPE) return sectorMedianPE;
+  try {
+    const r = await fetch(`/api/sectors?market=${encodeURIComponent($("f-market").value)}`);
+    const data = await r.json();
+    sectorMedianPE = new Map((data.rows ?? []).map(s => [s.sector, s.median_pe]));
+  } catch { sectorMedianPE = new Map(); }
+  return sectorMedianPE;
+}
+
+async function toggleStock(stock, row, subRow) {
+  const expand = !row.classList.contains("expanded");
+  row.classList.toggle("expanded", expand);
+  subRow.classList.toggle("hidden", !expand);
+  if (!expand) return;
+
+  const container = subRow.querySelector(".stock-detail-content");
+  renderStockPanel(stock, container);   // instant: TradingView data + slider
+
+  // Async enrichment: FMP detail + levels + sector medians, in parallel.
+  const t = stock.name;
+  const [detail, levels] = await Promise.all([
+    stockDetailCache.has(t)
+      ? Promise.resolve(stockDetailCache.get(t))
+      : fetch(`/api/stock/${encodeURIComponent(t)}/detail`).then(r => r.json()).catch(() => null),
+    stockLevelsCache.has(t)
+      ? Promise.resolve(stockLevelsCache.get(t))
+      : fetch(`/api/stock/${encodeURIComponent(t)}/levels`).then(r => r.json()).catch(() => null),
+  ]);
+  if (detail) stockDetailCache.set(t, detail);
+  if (levels) stockLevelsCache.set(t, levels);
+  await ensureSectorMedians();
+
+  // Row may have been collapsed while we were fetching
+  if (!row.classList.contains("expanded")) return;
+  renderStockPanel(stock, container, detail, levels);
+}
+
+function renderStockPanel(stock, container, detail = null, levels = null) {
+  const medians = sectorMedianPE || new Map();
+  const sectorPE = medians.get(stock.sector);
+
+  // --- Valuation block (Phase 1) ---
+  const peVsSector = (stock.price_earnings_ttm != null && sectorPE != null)
+    ? `<span class="text-xs ${stock.price_earnings_ttm <= sectorPE ? "text-emerald-custom" : "text-amber-600"}">
+        sector median ${sectorPE.toFixed(1)}</span>`
+    : "";
+
+  const fmpRows = !detail ? `<div class="shimmer h-4 rounded w-48 mt-2"></div>`
+    : !detail.available ? `<div class="text-xs text-slate-400 mt-2">Deeper fundamentals unavailable${detail.reason ? ` (${detail.reason})` : ""}</div>`
+    : `
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-1.5 mt-3 text-xs">
+        <div><span class="text-slate-400">P/B</span> <span class="tabular-nums font-medium">${fmtRatio(detail.price_to_book_ttm)}</span></div>
+        <div><span class="text-slate-400">P/FCF</span> <span class="tabular-nums font-medium">${fmtRatio(detail.price_to_fcf_ttm)}</span></div>
+        <div><span class="text-slate-400">Beta</span> <span class="tabular-nums font-medium">${fmtRatio(detail.beta)}</span></div>
+        <div><span class="text-slate-400">Net margin</span> <span class="tabular-nums font-medium">${detail.net_margin_ttm != null ? (detail.net_margin_ttm * 100).toFixed(1) + "%" : "—"}</span></div>
+        <div><span class="text-slate-400">ROE</span> <span class="tabular-nums font-medium">${detail.roe_ttm != null ? (detail.roe_ttm * 100).toFixed(1) + "%" : "—"}</span></div>
+        <div><span class="text-slate-400">Debt/Equity</span> <span class="tabular-nums font-medium">${fmtRatio(detail.debt_to_equity_ttm)}</span></div>
+      </div>`;
+
+  // --- Levels block (Phase 3) ---
+  let levelsHtml;
+  if (!levels) {
+    levelsHtml = `<div class="shimmer h-4 rounded w-64 mt-1"></div>`;
+  } else if (!levels.available) {
+    levelsHtml = `<div class="text-xs text-slate-400">Levels unavailable${levels.reason ? ` (${levels.reason})` : ""}</div>`;
+  } else {
+    const rr = levels.risk_reward;
+    const rrColor = rr == null ? "text-slate-500" : rr >= 2 ? "text-emerald-custom" : rr >= 1 ? "text-amber-600" : "text-rose-custom";
+    const sup = levels.support, res = levels.resistance;
+    levelsHtml = `
+      <div class="flex flex-wrap gap-x-8 gap-y-2 text-xs items-center">
+        <div><span class="text-slate-400">Support</span>
+          <span class="tabular-nums font-semibold text-slate-800">${sup ? "$" + sup.level.toLocaleString() : "—"}</span>
+          ${sup?.fallback ? `<span class="text-slate-400">(${sup.fallback})</span>` : sup ? `<span class="text-slate-400">(${sup.touches} touch${sup.touches === 1 ? "" : "es"})</span>` : ""}</div>
+        <div><span class="text-slate-400">Resistance</span>
+          <span class="tabular-nums font-semibold text-slate-800">${res ? "$" + res.level.toLocaleString() : "—"}</span>
+          ${res?.fallback ? `<span class="text-slate-400">(${res.fallback})</span>` : res ? `<span class="text-slate-400">(${res.touches} touch${res.touches === 1 ? "" : "es"})</span>` : ""}</div>
+        <div><span class="text-slate-400">R / R</span>
+          <span class="tabular-nums font-bold ${rrColor}">${rr == null ? "—" : "1 : " + rr.toFixed(1)}</span></div>
+        <div><span class="text-slate-400">ATR(14)</span>
+          <span class="tabular-nums font-medium">${levels.atr_14 != null ? "$" + levels.atr_14 + " (" + levels.atr_pct + "%/day)" : "—"}</span></div>
+        <div><span class="text-slate-400">52w</span>
+          <span class="tabular-nums">$${levels.week52_low.toLocaleString()} – $${levels.week52_high.toLocaleString()}</span></div>
+      </div>
+      <div class="text-[10px] text-slate-400 mt-1.5">Swing-cluster zones from ~1y of daily bars — a screening heuristic, not a prediction.</div>`;
+  }
+
+  // --- Price slider (Phase 2) ---
+  // All ratios scale linearly with price: factor f = slider / current price.
+  container.innerHTML = `
+    <div class="grid lg:grid-cols-2 gap-6">
+      <div>
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Valuation</div>
+        <div class="flex flex-wrap gap-x-8 gap-y-1.5 text-xs items-baseline">
+          <div><span class="text-slate-400">P/E</span> <span class="pe-adj tabular-nums font-semibold text-slate-800">${fmtRatio(stock.price_earnings_ttm)}</span> ${peVsSector}</div>
+          <div><span class="text-slate-400">PEG</span> <span class="peg-adj tabular-nums font-semibold text-slate-800">${fmtRatio(stock.price_earnings_growth_ttm)}</span></div>
+          <div><span class="text-slate-400">P/S</span> <span class="ps-adj tabular-nums font-semibold text-slate-800">${fmtRatio(stock.price_sales_current)}</span></div>
+          <div><span class="text-slate-400">Mkt Cap</span> <span class="mcap-adj tabular-nums font-semibold text-slate-800">${fmt.cap(stock.market_cap_basic)}</span></div>
+        </div>
+        ${fmpRows}
+
+        <div class="mt-5">
+          <div class="flex items-baseline justify-between">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">What-if price</div>
+            <button class="slider-reset text-[10px] text-primary font-semibold hover:underline">reset</button>
+          </div>
+          <div class="flex items-center gap-3 mt-1.5">
+            <input type="range" class="price-slider flex-1 accent-[#174ecf]" min="50" max="150" value="100" step="1"/>
+            <span class="price-adj tabular-nums text-sm font-bold text-slate-900 w-24 text-right">${fmt.price(stock.close)}</span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1">Drag to see how multiples scale if the price were <span class="pct-adj font-medium">+0%</span> from here. Fundamentals held fixed.</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Levels &amp; risk / reward</div>
+        ${levelsHtml}
+      </div>
+    </div>
+  `;
+
+  // Wire up the slider
+  const slider = container.querySelector(".price-slider");
+  const update = () => {
+    const f = parseInt(slider.value, 10) / 100;
+    const set = (sel, val, fmtFn) => {
+      const el = container.querySelector(sel);
+      if (el) el.textContent = val == null ? "—" : fmtFn(val);
+    };
+    set(".price-adj", stock.close != null ? stock.close * f : null, fmt.price);
+    set(".mcap-adj",  stock.market_cap_basic != null ? stock.market_cap_basic * f : null, fmt.cap);
+    set(".pe-adj",    stock.price_earnings_ttm != null ? stock.price_earnings_ttm * f : null, fmtRatio);
+    set(".peg-adj",   stock.price_earnings_growth_ttm != null ? stock.price_earnings_growth_ttm * f : null, fmtRatio);
+    set(".ps-adj",    stock.price_sales_current != null ? stock.price_sales_current * f : null, fmtRatio);
+    const pct = container.querySelector(".pct-adj");
+    if (pct) {
+      const delta = Math.round((f - 1) * 100);
+      pct.textContent = (delta >= 0 ? "+" : "") + delta + "%";
+    }
+    // Highlight adjusted values when off-baseline
+    container.querySelectorAll(".price-adj,.mcap-adj,.pe-adj,.peg-adj,.ps-adj").forEach(el => {
+      el.classList.toggle("text-primary", f !== 1);
+    });
+  };
+  slider.addEventListener("input", update);
+  container.querySelector(".slider-reset").addEventListener("click", (e) => {
+    e.stopPropagation();
+    slider.value = 100;
+    update();
+  });
 }
 
 // Cache of fetched stocks per sector key, valid until next sectors render.
@@ -504,6 +685,8 @@ const SORTS_STOCKS = [
   ["Perf.1M|asc", "20D % ↑"],
   ["RSI|asc", "RSI ↑ (oversold)"],
   ["RSI|desc", "RSI ↓ (overbought)"],
+  ["price_earnings_ttm|asc", "P/E ↑ (cheapest)"],
+  ["price_earnings_ttm|desc", "P/E ↓"],
   ["volume|desc", "Volume ↓"],
 ];
 const SORTS_SECTORS = [
@@ -681,6 +864,7 @@ $("f-market-cap").addEventListener("change", () => {
 $("f-market-cap-custom").addEventListener("input", applyDebounced);
 
 // Auto-apply on change/input
+$("f-market").addEventListener("change", () => { sectorMedianPE = null; });
 ["f-market", "f-sort", "f-limit"].forEach((id) => $(id).addEventListener("change", apply));
 ["f-1d", "f-7d", "f-20d"].forEach((id) => $(id).addEventListener("input", applyDebounced));
 
