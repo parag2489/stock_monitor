@@ -342,7 +342,7 @@ function hideMessage() { $("message").classList.add("hidden"); }
 // Client-side caches for expand-panel data, cleared on each re-render.
 const stockDetailCache = new Map();   // ticker -> /api/stock/{t}/detail JSON
 const stockLevelsCache = new Map();   // ticker -> /api/stock/{t}/levels JSON
-let sectorMedianPE = null;            // sector name -> median P/E (lazy, per market)
+let sectorMedians = null;             // sector name -> {median_pe, median_ps, median_pb, median_net_margin}
 
 function fmtRatio(v) { return v == null ? "—" : v.toFixed(2); }
 
@@ -392,13 +392,15 @@ function renderStockRows(rows) {
 }
 
 async function ensureSectorMedians() {
-  if (sectorMedianPE) return sectorMedianPE;
+  if (sectorMedians) return sectorMedians;
   try {
     const r = await fetch(`/api/sectors?market=${encodeURIComponent($("f-market").value)}`);
     const data = await r.json();
-    sectorMedianPE = new Map((data.rows ?? []).map(s => [s.sector, s.median_pe]));
-  } catch { sectorMedianPE = new Map(); }
-  return sectorMedianPE;
+    sectorMedians = new Map((data.rows ?? []).map(s => [s.sector, {
+      pe: s.median_pe, ps: s.median_ps, pb: s.median_pb, nm: s.median_net_margin,
+    }]));
+  } catch { sectorMedians = new Map(); }
+  return sectorMedians;
 }
 
 async function toggleStock(stock, row, subRow) {
@@ -430,24 +432,35 @@ async function toggleStock(stock, row, subRow) {
 }
 
 function renderStockPanel(stock, container, detail = null, levels = null) {
-  const medians = sectorMedianPE || new Map();
-  const sectorPE = medians.get(stock.sector);
+  const medians = (sectorMedians || new Map()).get(stock.sector) || {};
 
-  // --- Valuation block (Phase 1) ---
-  const peVsSector = (stock.price_earnings_ttm != null && sectorPE != null)
-    ? `<span class="text-xs ${stock.price_earnings_ttm <= sectorPE ? "text-emerald-custom" : "text-amber-600"}">
-        sector median ${sectorPE.toFixed(1)}</span>`
-    : "";
+  // Color a stock's own metric vs its sector median.
+  // lowerBetter=true for valuation ratios (cheaper = green), false for margins.
+  const cmpColor = (val, med, lowerBetter = true) => {
+    if (val == null || med == null) return "text-slate-800";
+    const better = lowerBetter ? val <= med : val >= med;
+    return better ? "text-emerald-custom" : "text-amber-600";
+  };
+
+  // Bare green sector-median number to sit next to a metric (no label text).
+  const medBadge = (med, fmtFn) =>
+    med == null ? "" : ` <span class="text-emerald-custom tabular-nums text-xs">${fmtFn(med)}</span>`;
+
+  const pctFmt = (v) => (v * 100).toFixed(1) + "%";
+
+  // Net margin comes from FMP detail (fraction). Sector median also a fraction.
+  const stockNetMargin = detail && detail.available ? detail.net_margin_ttm : null;
+  const stockPB = detail && detail.available ? detail.price_to_book_ttm : null;
 
   const fmpRows = !detail ? `<div class="shimmer h-4 rounded w-48 mt-2"></div>`
     : !detail.available ? `<div class="text-xs text-slate-400 mt-2">Deeper fundamentals unavailable${detail.reason ? ` (${detail.reason})` : ""}</div>`
     : `
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-1.5 mt-3 text-xs">
-        <div><span class="text-slate-400">P/B</span> <span class="tabular-nums font-medium">${fmtRatio(detail.price_to_book_ttm)}</span></div>
+        <div><span class="text-slate-400">P/B</span> <span class="tabular-nums font-medium ${cmpColor(stockPB, medians.pb, true)}">${fmtRatio(stockPB)}</span>${medBadge(medians.pb, fmtRatio)}</div>
         <div><span class="text-slate-400">P/FCF</span> <span class="tabular-nums font-medium">${fmtRatio(detail.price_to_fcf_ttm)}</span></div>
         <div><span class="text-slate-400">Beta</span> <span class="tabular-nums font-medium">${fmtRatio(detail.beta)}</span></div>
-        <div><span class="text-slate-400">Net margin</span> <span class="tabular-nums font-medium">${detail.net_margin_ttm != null ? (detail.net_margin_ttm * 100).toFixed(1) + "%" : "—"}</span></div>
-        <div><span class="text-slate-400">ROE</span> <span class="tabular-nums font-medium">${detail.roe_ttm != null ? (detail.roe_ttm * 100).toFixed(1) + "%" : "—"}</span></div>
+        <div><span class="text-slate-400">Net margin</span> <span class="tabular-nums font-medium ${cmpColor(stockNetMargin, medians.nm, false)}">${stockNetMargin != null ? pctFmt(stockNetMargin) : "—"}</span>${medBadge(medians.nm, pctFmt)}</div>
+        <div><span class="text-slate-400">ROE</span> <span class="tabular-nums font-medium">${detail.roe_ttm != null ? pctFmt(detail.roe_ttm) : "—"}</span></div>
         <div><span class="text-slate-400">Debt/Equity</span> <span class="tabular-nums font-medium">${fmtRatio(detail.debt_to_equity_ttm)}</span></div>
       </div>`;
 
@@ -484,11 +497,11 @@ function renderStockPanel(stock, container, detail = null, levels = null) {
   container.innerHTML = `
     <div class="grid lg:grid-cols-2 gap-6">
       <div>
-        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Valuation</div>
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Valuation <span class="text-emerald-custom normal-case font-semibold">(Sector median in Green)</span></div>
         <div class="flex flex-wrap gap-x-8 gap-y-1.5 text-xs items-baseline">
-          <div><span class="text-slate-400">P/E</span> <span class="pe-adj tabular-nums font-semibold text-slate-800">${fmtRatio(stock.price_earnings_ttm)}</span> ${peVsSector}</div>
+          <div><span class="text-slate-400">P/E</span> <span class="pe-adj tabular-nums font-semibold ${cmpColor(stock.price_earnings_ttm, medians.pe, true)}">${fmtRatio(stock.price_earnings_ttm)}</span>${medBadge(medians.pe, fmtRatio)}</div>
           <div><span class="text-slate-400">PEG</span> <span class="peg-adj tabular-nums font-semibold text-slate-800">${fmtRatio(stock.price_earnings_growth_ttm)}</span></div>
-          <div><span class="text-slate-400">P/S</span> <span class="ps-adj tabular-nums font-semibold text-slate-800">${fmtRatio(stock.price_sales_current)}</span></div>
+          <div><span class="text-slate-400">P/S</span> <span class="ps-adj tabular-nums font-semibold ${cmpColor(stock.price_sales_current, medians.ps, true)}">${fmtRatio(stock.price_sales_current)}</span>${medBadge(medians.ps, fmtRatio)}</div>
           <div><span class="text-slate-400">Mkt Cap</span> <span class="mcap-adj tabular-nums font-semibold text-slate-800">${fmt.cap(stock.market_cap_basic)}</span></div>
         </div>
         ${fmpRows}
@@ -515,6 +528,7 @@ function renderStockPanel(stock, container, detail = null, levels = null) {
 
   // Wire up the slider
   const slider = container.querySelector(".price-slider");
+  const COMPARE_CLASSES = ["text-emerald-custom", "text-amber-600", "text-slate-800", "text-primary"];
   const update = () => {
     const f = parseInt(slider.value, 10) / 100;
     const set = (sel, val, fmtFn) => {
@@ -531,10 +545,29 @@ function renderStockPanel(stock, container, detail = null, levels = null) {
       const delta = Math.round((f - 1) * 100);
       pct.textContent = (delta >= 0 ? "+" : "") + delta + "%";
     }
-    // Highlight adjusted values when off-baseline
-    container.querySelectorAll(".price-adj,.mcap-adj,.pe-adj,.peg-adj,.ps-adj").forEach(el => {
+
+    // Recolor P/E and P/S vs sector median using the *adjusted* value, so the
+    // green/amber comparison stays meaningful as you drag. mcap/peg just go blue.
+    const applyColor = (sel, adjVal, med, lowerBetter) => {
+      const el = container.querySelector(sel);
+      if (!el) return;
+      el.classList.remove(...COMPARE_CLASSES);
+      if (med != null && adjVal != null) {
+        const better = lowerBetter ? adjVal <= med : adjVal >= med;
+        el.classList.add(better ? "text-emerald-custom" : "text-amber-600");
+      } else {
+        el.classList.add("text-slate-800");
+      }
+    };
+    applyColor(".pe-adj", stock.price_earnings_ttm != null ? stock.price_earnings_ttm * f : null, medians.pe, true);
+    applyColor(".ps-adj", stock.price_sales_current != null ? stock.price_sales_current * f : null, medians.ps, true);
+
+    // mcap + peg: neutral, but show blue when off-baseline to signal "hypothetical"
+    container.querySelectorAll(".mcap-adj,.peg-adj").forEach(el => {
       el.classList.toggle("text-primary", f !== 1);
+      el.classList.toggle("text-slate-800", f === 1);
     });
+    container.querySelector(".price-adj")?.classList.toggle("text-primary", f !== 1);
   };
   slider.addEventListener("input", update);
   container.querySelector(".slider-reset").addEventListener("click", (e) => {
@@ -864,7 +897,7 @@ $("f-market-cap").addEventListener("change", () => {
 $("f-market-cap-custom").addEventListener("input", applyDebounced);
 
 // Auto-apply on change/input
-$("f-market").addEventListener("change", () => { sectorMedianPE = null; });
+$("f-market").addEventListener("change", () => { sectorMedians = null; });
 ["f-market", "f-sort", "f-limit"].forEach((id) => $(id).addEventListener("change", apply));
 ["f-1d", "f-7d", "f-20d"].forEach((id) => $(id).addEventListener("input", applyDebounced));
 

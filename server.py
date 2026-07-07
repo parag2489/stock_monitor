@@ -229,6 +229,9 @@ SECTOR_AGG_COLUMNS: list[str] = [
     "Perf.1M",
     "market_cap_basic",
     "price_earnings_ttm",
+    "price_sales_current",   # P/S
+    "price_book_ratio",      # P/B
+    "net_margin",            # net profit margin (as a fraction, e.g. 0.26)
 ]
 
 
@@ -285,7 +288,10 @@ def sectors(
         sec = vals.get("sector")
         if not sec:
             continue
-        b = buckets.setdefault(sec, {"change": [], "Perf.W": [], "Perf.1M": [], "mcap": [], "pe": []})
+        b = buckets.setdefault(sec, {
+            "change": [], "Perf.W": [], "Perf.1M": [], "mcap": [],
+            "pe": [], "ps": [], "pb": [], "nm": [],
+        })
         for key in ("change", "Perf.W", "Perf.1M"):
             v = vals.get(key)
             if v is not None:
@@ -296,6 +302,15 @@ def sectors(
         pe = vals.get("price_earnings_ttm")
         if pe is not None and 0 < pe < 500:  # drop negatives and absurd outliers
             b["pe"].append(pe)
+        ps = vals.get("price_sales_current")
+        if ps is not None and 0 < ps < 200:
+            b["ps"].append(ps)
+        pb = vals.get("price_book_ratio")
+        if pb is not None and 0 < pb < 200:
+            b["pb"].append(pb)
+        nm = vals.get("net_margin")
+        if nm is not None and -5 < nm < 5:  # fraction; filters garbage outliers
+            b["nm"].append(nm)
 
     def mean(xs: list[float]) -> Optional[float]:
         return sum(xs) / len(xs) if xs else None
@@ -309,6 +324,9 @@ def sectors(
             "mean_7d":  mean(b["Perf.W"]),
             "mean_20d": mean(b["Perf.1M"]),
             "median_pe": _median(b["pe"]),
+            "median_ps": _median(b["ps"]),
+            "median_pb": _median(b["pb"]),
+            "median_net_margin": _median(b["nm"]),
             "total_market_cap": sum(b["mcap"]) if b["mcap"] else None,
         })
 
