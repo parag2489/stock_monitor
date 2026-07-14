@@ -357,6 +357,18 @@ function renderStockRows(rows) {
   for (const r of rows) {
     const tr = document.createElement("tr");
     tr.className = "sector-row hover:bg-slate-50 transition-colors"; // reuse cursor/chevron styles
+
+    // EMA line under the ticker: blue when price >= EMA, orange when below.
+    const emaSpan = (label, ema) => {
+      if (ema == null || r.close == null) return "";
+      const color = r.close >= ema ? "text-primary" : "text-orange-500";
+      return `<span class="${color}">${label} $${ema.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}</span>`;
+    };
+    const emaParts = [emaSpan("20E", r.EMA20), emaSpan("50E", r.EMA50)].filter(Boolean);
+    const emaLine = emaParts.length
+      ? `<div class="text-[10px] font-sans font-semibold tabular-nums mt-0.5 ml-[20px] flex gap-2">${emaParts.join("")}</div>`
+      : "";
+
     tr.innerHTML = `
       <td class="p-4 font-bold text-slate-900 font-display">
         <span class="inline-flex items-center gap-2">
@@ -366,6 +378,7 @@ function renderStockRows(rows) {
           </svg>
           ${r.name ?? "—"}
         </span>
+        ${emaLine}
       </td>
       <td class="p-4 text-sm text-slate-700 max-w-[260px] truncate" title="${r.description ?? ""}">${r.description ?? "—"}</td>
       <td class="p-4 text-sm text-slate-500">${r.sector ?? "—"}</td>
