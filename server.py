@@ -60,6 +60,7 @@ COLUMNS: list[str] = [
     "RSI",               # Relative Strength Index, 14-period daily
     "EMA20",             # 20-day exponential moving average
     "EMA50",             # 50-day exponential moving average
+    "net_margin",        # net profit margin (fraction); used by the trading agent's quality gate
     "price_earnings_ttm",         # P/E (trailing 12 months)
     "price_sales_current",        # P/S
     "price_earnings_growth_ttm",  # PEG (trailing; null for many names)
