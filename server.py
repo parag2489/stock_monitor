@@ -526,6 +526,23 @@ def _atr(candles: list[dict], period: int = 14) -> Optional[float]:
     return sum(recent) / len(recent)
 
 
+def _pct_change_n_bars(candles: list[dict], n: int) -> Optional[float]:
+    """Percent change over the last n trading sessions, from daily candles.
+
+    TradingView's scanner has no 3-day performance field (its vocabulary stops
+    at `change` for 1D and jumps to `Perf.W`), so short-horizon changes are
+    computed here from the candles the levels endpoint already fetches — no
+    extra API calls.
+    """
+    if len(candles) < n + 1:
+        return None
+    old = candles[-(n + 1)]["close"]
+    new = candles[-1]["close"]
+    if not old:
+        return None
+    return (new - old) / old * 100
+
+
 @app.get("/api/stock/{ticker}/levels")
 def stock_levels(ticker: str) -> dict[str, Any]:
     """Support/resistance zones from ~1 year of daily candles, plus ATR and
@@ -608,18 +625,21 @@ def stock_levels(ticker: str) -> dict[str, Any]:
             rr = round(upside / downside, 2)
 
     atr = _atr(candles)
+    chg_3d = _pct_change_n_bars(candles, 3)
+    chg_5d = _pct_change_n_bars(candles, 5)
     result = {
         "available": True,
         "ticker": ticker,
         "price": price,
+        "change_3d_pct": round(chg_3d, 2) if chg_3d is not None else None,
+        "change_5d_pct": round(chg_5d, 2) if chg_5d is not None else None,
         "as_of": candles[-1]["date"],
         "support": support,
         "resistance": resistance,
         "risk_reward": rr,
         "atr_14": round(atr, 2) if atr else None,
         "atr_pct": round(atr / price * 100, 2) if atr and price else None,
-        "week52_high": round(hi_52w, 2),
-        "week52_low": round(lo_52w, 2),
+        "week52_high": round(hi_52w, 2),        "week52_low": round(lo_52w, 2),
         "candles_used": n,
         "note": "Zones from swing-point clustering over ~1y of daily bars. "
                 "Heuristic screening aid, not a prediction.",

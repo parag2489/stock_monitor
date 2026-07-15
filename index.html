@@ -489,6 +489,8 @@ function renderStockPanel(stock, container, detail = null, levels = null) {
     const sup = levels.support, res = levels.resistance;
     levelsHtml = `
       <div class="flex flex-wrap gap-x-8 gap-y-2 text-xs items-center">
+        <div><span class="text-slate-400">3D chg</span>
+          <span class="tabular-nums font-semibold ${tone(levels.change_3d_pct)}">${fmt.pct(levels.change_3d_pct)}</span></div>
         <div><span class="text-slate-400">Support</span>
           <span class="tabular-nums font-semibold text-slate-800">${sup ? "$" + sup.level.toLocaleString() : "—"}</span>
           ${sup?.fallback ? `<span class="text-slate-400">(${sup.fallback})</span>` : sup ? `<span class="text-slate-400">(${sup.touches} touch${sup.touches === 1 ? "" : "es"})</span>` : ""}</div>
